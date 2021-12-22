@@ -18,15 +18,12 @@ builder.Services.AddScoped<IUploadFileRepository, EntityFrameworkUploadFileRepos
 builder.Services.AddScoped<IUserPasswordsRepository, EntityFrameworkUserPasswordRepository>();
 builder.Services.AddScoped<IUploadFileRepository, EntityFrameworkUploadFileRepository>();
 builder.Services.AddScoped<IUserKeyRepository, EntityFrameworkUserKeyRepository>();
+builder.Services.AddSpaStaticFiles(config => config.RootPath = "wwwroot");
 builder.Services.AddAutoMapper(typeof(Program));
 builder.Services.AddControllersWithViews();
 builder.Services.AddDbContext<ApplicationDbContext>(options => options.UseSqlServer(
     builder.Configuration.GetConnectionString("DefaultConnection")
     ));
-//builder.Services.AddMvc(option =>
-//{
-//    option.Filters.Add(new HMACAuthenticationAttribute());
-//});
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -37,8 +34,16 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
+
 app.UseHttpsRedirection();
 app.UseStaticFiles();
+//app.UseSpaStaticFiles();
+
+app.UseCors(x => x
+ .AllowAnyOrigin()
+ .AllowAnyMethod()
+ .AllowAnyHeader()
+);
 
 app.UseRouting();
 
@@ -67,6 +72,13 @@ app.Use(async (context, next) =>
 });
 // webSocket end here
 
+//app.UseSpa(config =>
+//{
+//    config.Options.SourcePath = Path.Join("D:/AngularProject/security-front");
+//    config.UseAngularCliServer("start");
+//});
+
+
 app.UseAuthorization();
 
 app.UseAuthentication();
@@ -79,9 +91,12 @@ app.Run();
 
 async Task Send(HttpContext context, WebSocket webSocket)
 {
-    Guid key = Guid.NewGuid();
+    //Guid key = Guid.NewGuid();
+    var rsaServer = new RSACryptoServiceProvider(1024);
+    var publicKeyXml = rsaServer.ToXmlString(false); // when you want to try socket in console mode send this as public key instead of RSAAsymmetric.ExportPublicKey(rsaServer)
 
     var buffer = new byte[1024 * 4];
+    
     WebSocketReceiveResult result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer, 0, buffer.Length), System.Threading.CancellationToken.None);
     if (result != null)
     {
@@ -91,12 +106,25 @@ async Task Send(HttpContext context, WebSocket webSocket)
             string msg = Encoding.ASCII.GetString(new ArraySegment<byte>(buffer, 0, result.Count));
             Console.WriteLine($"Client is Said: {msg}");
             // send the public key to the client.
-            await webSocket.SendAsync(new ArraySegment<byte>(Encoding.ASCII.GetBytes($"{key}")), result.MessageType, result.EndOfMessage, System.Threading.CancellationToken.None);
+            await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(RSAAsymmetric.ExportPublicKey(rsaServer))), result.MessageType, result.EndOfMessage, System.Threading.CancellationToken.None);
+            // read the rsa encrypted message and try to decode it using the private key.
             result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), System.Threading.CancellationToken.None);
-            var sessionIdString = Encoding.ASCII.GetString(new ArraySegment<byte>(buffer, 0, result.Count));
-            Console.WriteLine($"this is sessionId Before decrypt {sessionIdString}");
-            var sessionId = AesGcmEncryptionAlgorithm.Decrypt(sessionIdString, key.ToString());
-            Console.WriteLine($"this is session id {sessionId}");
+            msg = Encoding.UTF8.GetString(new ArraySegment<byte>(buffer, 0, result.Count));
+            Console.WriteLine($"Client is Said: {msg}");
+            try // here we try to decode it if we cant we are going to close the session.
+            {
+                var sessionIdString = Encoding.UTF8.GetString(new ArraySegment<byte>(buffer, 0, result.Count));
+                Console.WriteLine($"this is sessionId Before decrypt {sessionIdString}");
+                var sessionId = rsaServer.Decrypt(Convert.FromBase64String(sessionIdString), false);
+                Console.WriteLine($"this is session id {Encoding.UTF8.GetString(sessionId)}");
+            }catch (Exception ex)
+            {
+                Console.WriteLine(ex.ToString());
+                await webSocket.CloseAsync(result.CloseStatus.Value, result.CloseStatusDescription, System.Threading.CancellationToken.None);
+            }
+            // sending Approve session id for client
+            await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes("Approve")), result.MessageType, result.EndOfMessage, System.Threading.CancellationToken.None);
+            // if you want to stop here just comment the next line.
             result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), System.Threading.CancellationToken.None);
         }
     }

@@ -4,6 +4,8 @@ using InformationSecurity.Dtos;
 using InformationSecurity.Filters;
 using InformationSecurity.Models;
 using InformationSecurity.Repositories;
+using Microsoft.AspNetCore.Cors;
+//using System.Web.Http.Cors;
 using Microsoft.AspNetCore.Mvc;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
@@ -12,6 +14,8 @@ using System.Text;
 namespace InformationSecurity.Controllers
 {
     [ApiController]
+    //[EnableCors()]
+    //[EnableCors(origins: "http://localhost:4200", headers: "*", methods: "*")]
     public class UserController : Controller
     {
         private readonly IUserRepository _repository;
@@ -26,7 +30,7 @@ namespace InformationSecurity.Controllers
             _userKeyRepository = userKeyRepository;
         }
 
-        [RequestHeaderMACFilter]
+        //[RequestHeaderMACFilter]
         [HttpGet] // Get user/getusers
         [Route("/user")]
         public async Task<IActionResult> GetUsers()
